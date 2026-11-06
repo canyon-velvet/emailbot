@@ -17,9 +17,6 @@ emailbot = "emailbot.cli:app"
 requires = ["uv_build>=0.9.28,<0.10"]
 build-backend = "uv_build"
 
-[tool.ruff]
-target-version = "py312"
-
 [tool.ruff.lint]
 # E/F: pycodestyle and pyflakes; I: import order; B: likely bugs; UP: modern syntax;
 # S: flake8-bandit security checks (this is a security-first project).
@@ -32,6 +29,7 @@ select = ["E", "F", "I", "B", "UP", "S"]
 include = ["src", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
+# Find the project venv however pyright is started (editor, uv run, or .venv/bin).
 venvPath = "."
 venv = ".venv"
 

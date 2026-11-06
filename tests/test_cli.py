@@ -1,4 +1,4 @@
-"""The top-level `emailbot` command, run in-process (Seam 1)."""
+"""Run the `emailbot` command in-process and check only its output and exit code."""
 
 import tomllib
 from pathlib import Path
@@ -22,9 +22,9 @@ def test_version_prints_the_declared_version():
     assert result.output.strip() == f"emailbot {declared_version()}"
 
 
-def test_help_shows_usage_and_the_version_option():
+def test_help_describes_emailbot_and_its_version_option():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "Usage:" in result.output
+    assert "It never sends email." in result.output
     assert "--version" in result.output

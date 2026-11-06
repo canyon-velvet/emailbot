@@ -5,8 +5,16 @@ from typing import Annotated
 
 import typer
 
-# No shell-completion options: `--install-completion` edits the user's shell config.
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    # `--install-completion` would edit the user's shell config.
+    add_completion=False,
+    # Plain help text: Rich formatting forces ANSI colours in CI.
+    rich_markup_mode=None,
+    # Standard tracebacks: Typer's pretty ones print local variables, which can
+    # include secrets.
+    pretty_exceptions_enable=False,
+)
 
 
 def _print_version(requested: bool) -> None:
