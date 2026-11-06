@@ -2,8 +2,6 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This repo is **single-context**: one `GLOSSARY.md` and one `docs/adr/` at the repo root.
-
 ## Before exploring, read these
 
 - **`GLOSSARY.md`** at the repo root.
@@ -13,12 +11,14 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 
 ## File structure
 
+Single-context layout (ADR names are placeholders):
+
 ```
 /
 ├── GLOSSARY.md
 ├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
+│   ├── 0001-<decision-title>.md
+│   └── 0002-<decision-title>.md
 └── src/
 ```
 
@@ -32,4 +32,4 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+> _Contradicts ADR-0007 (<decision title>), but worth reopening because…_

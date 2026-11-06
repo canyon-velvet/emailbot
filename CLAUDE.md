@@ -8,7 +8,7 @@ Issues and specs live in this repo's GitHub Issues, managed with the `gh` CLI. S
 
 ### Triage labels
 
-The five default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+The default triage labels, unrenamed. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
