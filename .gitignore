@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+*.p12
+client_secret*.json
+credentials.json
+token.json
+token.pickle
+
+# Local mail data and logs: never commit (test fixtures must be synthetic)
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+*.mbox
+*.eml
+!tests/fixtures/**/*.eml
+
+# Local tooling
+.claude/settings.local.json
+.claude/worktrees/
+.claude/.cc-writes/
+.DS_Store
