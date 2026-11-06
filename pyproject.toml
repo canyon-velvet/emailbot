@@ -14,7 +14,7 @@ dependencies = [
 emailbot = "emailbot.cli:app"
 
 [build-system]
-requires = ["uv_build>=0.9.28,<0.10"]
+requires = ["uv_build>=0.9.28,<0.14"]
 build-backend = "uv_build"
 
 [tool.ruff.lint]
