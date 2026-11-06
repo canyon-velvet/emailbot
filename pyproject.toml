@@ -1,0 +1,41 @@
+[project]
+name = "emailbot"
+version = "0.1.0"
+description = "A security-first email assistant for Gmail that works with any LLM. It never sends email."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+emailbot = "emailbot.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10"]
+build-backend = "uv_build"
+
+[tool.ruff.lint]
+# E/F: pycodestyle and pyflakes; I: import order; B: likely bugs; UP: modern syntax;
+# S: flake8-bandit security checks (this is a security-first project).
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # pytest uses plain assert
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+# Find the project venv however pyright is started (editor, uv run, or .venv/bin).
+venvPath = "."
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]

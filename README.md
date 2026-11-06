@@ -2,7 +2,7 @@
 
 An open-source, security-first email assistant for Gmail that works with any LLM: OpenAI, Anthropic, Gemini, Ollama, or any OpenAI-compatible endpoint. You run it on your own computer, and it never sends email. It writes drafts, and you press Send.
 
-> **Status:** early development. There is nothing to install yet.
+> **Status:** early development. The `emailbot` command installs from source, but it doesn't connect to Gmail yet.
 
 ## What it will do
 
