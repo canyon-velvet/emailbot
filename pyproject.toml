@@ -34,6 +34,9 @@ venvPath = "."
 venv = ".venv"
 
 [dependency-groups]
+audit = [
+    "pip-audit>=2.10.1",
+]
 dev = [
     "pyright>=1.1.414",
     "pytest>=9.2.0",
