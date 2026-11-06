@@ -8,19 +8,33 @@ dist/
 build/
 *.egg-info/
 
-# Secrets and local mail data: never commit
+# Secrets: never commit
 .env
 .env.*
 !.env.example
+.envrc
 *.pem
+*.key
+*.p12
 client_secret*.json
-credentials*.json
-token*.json
-*.sqlite
-*.sqlite3
+credentials.json
+token.json
+token.pickle
+
+# Local mail data and logs: never commit (test fixtures must be synthetic)
 *.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+*.mbox
+*.eml
+!tests/fixtures/**/*.eml
 
 # Local tooling
 .claude/settings.local.json
 .claude/worktrees/
+.claude/.cc-writes/
 .DS_Store
