@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src" / "emailbot"
 
 # Gmail API names for sending, permanent deletion, forwarding and delegated access.
@@ -23,7 +23,7 @@ BANNED_ATTRIBUTES = {
 }
 
 
-def find_forbidden(source: str, path: str) -> list[str]:
+def find_forbidden(source: str | bytes, path: str) -> list[str]:
     """Return a `path:line: rule` message for each banned use in `source`."""
     found: list[tuple[int, str]] = []
     for node in ast.walk(ast.parse(source, filename=path)):
@@ -36,15 +36,14 @@ def find_forbidden(source: str, path: str) -> list[str]:
     return [f"{path}:{line}: {rule}" for line, rule in sorted(found)]
 
 
-def test_package_has_no_forbidden_code() -> None:
+def test_package_has_no_forbidden_code():
     files = sorted(PACKAGE.rglob("*.py"))
     assert files, f"no Python files under {PACKAGE}"
     found = [
         message
         for file in files
-        for message in find_forbidden(
-            file.read_text(encoding="utf-8"), str(file.relative_to(ROOT))
-        )
+        # Bytes, so a `# coding:` line is decoded the way Python decodes it.
+        for message in find_forbidden(file.read_bytes(), str(file.relative_to(ROOT)))
     ]
     assert not found, "\n".join(found)
 
@@ -94,7 +93,7 @@ def test_package_has_no_forbidden_code() -> None:
             id="delegates",
         ),
         pytest.param(
-            "import email\nimport smtplib\n",
+            "import email\nimport os, smtplib as mail\n",
             "sample.py:2: banned import of `smtplib`",
             id="import smtplib",
         ),
@@ -105,11 +104,11 @@ def test_package_has_no_forbidden_code() -> None:
         ),
     ],
 )
-def test_checker_catches_each_banned_pattern(sample: str, expected: str) -> None:
+def test_checker_catches_each_banned_pattern(sample, expected):
     assert find_forbidden(sample, "sample.py") == [expected]
 
 
-def test_checker_passes_code_that_only_trashes_labels_and_drafts() -> None:
+def test_checker_passes_allowed_gmail_calls_and_near_miss_names():
     clean = (
         "from email.message import EmailMessage\n"
         "\n"
