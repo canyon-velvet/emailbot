@@ -43,6 +43,11 @@ _LOCAL_NETWORKS = [
 ]
 _LOCAL_NAME_SUFFIXES = (".local", ".home.arpa")
 
+# A host name or IPv4 address: dot-separated labels of letters, digits, `-` and `_`,
+# with an optional final dot.
+_LABEL = r"[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?"
+_HOST_NAME = re.compile(rf"(?:{_LABEL}\.)*{_LABEL}\.?")
+
 
 class ConfigError(Exception):
     """A problem with the config file, explained in plain words for the user."""
@@ -66,22 +71,36 @@ class _StrictLoader(yaml.SafeLoader):
 
 
 def _host(url: str) -> str | None:
-    """The lowercased host of an http(s) address, or None if it isn't one."""
+    """The lowercased host of a well-formed http(s) address, or None."""
+    # urlsplit silently drops tabs and line breaks, which HTTP clients don't.
+    if not url.isprintable() or " " in url:
+        return None
     try:
         address = urlsplit(url)
-    except ValueError:  # e.g. an unclosed IPv6 bracket
+        _ = address.port  # raises ValueError for a port that isn't 0-65535
+    except ValueError:  # also e.g. an unclosed IPv6 bracket
         return None
-    return address.hostname if address.scheme in ("http", "https") else None
+    host = address.hostname or ""
+    if address.scheme not in ("http", "https"):
+        return None
+    if "[" in address.netloc:  # brackets are only for IPv6 addresses
+        return host if _ip_address(host, version=6) else None
+    return host if _HOST_NAME.fullmatch(host) else None
 
 
-def _not_local(host: str) -> str | None:
+def _ip_address(host: str, version: int | None = None):
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    return ip if version in (None, ip.version) else None
+
+
+def _why_not_local(host: str) -> str | None:
     """Why a model at `host` can't be marked local, or None if it can."""
     if host == "localhost" or host.endswith(_LOCAL_NAME_SUFFIXES):
         return None
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:  # a name, other than the ones above
-        ip = None
+    ip = _ip_address(host)
     if ip and ip.is_link_local:
         return (
             "is a link-local address, which cloud metadata services use, so it "
@@ -134,12 +153,19 @@ class SecretsConfig(_Section):
 
 
 class ModelConfig(_Section):
-    """The model for one task."""
+    """The model for one of classify, digest or draft."""
 
     provider: Literal["openai", "anthropic", "gemini", "openai-compatible"]
     model: str
     base_url: str | None = Field(default=None, validate_default=True)
     local: bool = False
+
+    @field_validator("model")
+    @classmethod
+    def _not_blank(cls, model: str) -> str:
+        if not model.strip():
+            raise ValueError("can't be blank")
+        return model
 
     @field_validator("base_url")
     @classmethod
@@ -166,7 +192,7 @@ class ModelConfig(_Section):
                 "gemini are cloud services"
             )
         host = _host(info.data["base_url"]) or ""
-        if problem := _not_local(host):
+        if problem := _why_not_local(host):
             raise ValueError(f"{host!r} {problem}")
         return local
 

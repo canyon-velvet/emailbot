@@ -322,7 +322,7 @@ def test_check_reports_a_path_it_cannot_read(tmp_path):
     assert result.stderr.startswith(f"Can't read {tmp_path}: ")
 
 
-def test_check_accepts_a_model_for_each_task(tmp_path):
+def test_check_accepts_a_model_for_classify_digest_and_draft(tmp_path):
     path = write(
         tmp_path,
         "models:\n"
@@ -353,17 +353,8 @@ def test_check_accepts_a_model_for_each_task(tmp_path):
             "{provider: openai-compatible, model: x}",
             "models.digest.base_url: required when the provider is openai-compatible",
         ),
-        (
-            "{provider: openai, model: x, base_url: 'localhost:11434'}",
-            "models.digest.base_url: should be a full address such as "
-            "http://localhost:11434/v1",
-        ),
-        (
-            "{provider: openai, model: x, base_url: 'http://[::1'}",
-            "models.digest.base_url: should be a full address such as "
-            "http://localhost:11434/v1",
-        ),
         ("{provider: openai}", "models.digest.model: Field required"),
+        ("{provider: openai, model: '  '}", "models.digest.model: can't be blank"),
     ],
 )
 def test_check_rejects_an_incomplete_or_unknown_model(tmp_path, model, problem):
@@ -373,6 +364,35 @@ def test_check_rejects_an_incomplete_or_unknown_model(tmp_path, model, problem):
 
     assert result.exit_code == 1
     assert result.stderr == f"{path} has 1 problem:\n  {problem}\n"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "'localhost:11434'",  # no http:// or https://
+        "'http://[::1'",
+        "'http://localhost:abc/v1'",
+        "'http://localhost:99999/v1'",
+        "'http://a b.local/v1'",
+        "'http://.local/v1'",
+        "'http://[v1.local]/v1'",  # brackets are only for IPv6 addresses
+        '"http://evil.com\\n.local/v1"',  # a line break, which URL parsers drop
+    ],
+)
+def test_check_rejects_a_base_url_that_is_not_a_full_address(tmp_path, base_url):
+    path = write(
+        tmp_path,
+        f"models:\n  digest: {{provider: openai, model: x, base_url: {base_url}}}\n",
+    )
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} has 1 problem:\n"
+        "  models.digest.base_url: should be a full address such as "
+        "http://localhost:11434/v1\n"
+    )
 
 
 def local_model(tmp_path, base_url, provider="openai-compatible"):
