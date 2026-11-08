@@ -16,7 +16,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core import ErrorDetails
-from yaml.constructor import ConstructorError
+from yaml.composer import ComposerError
 from yaml.reader import ReaderError
 
 # Plain ASCII addresses only: dot-separated words, then dot-separated domain labels
@@ -34,16 +34,18 @@ class ConfigError(Exception):
 class _StrictLoader(yaml.SafeLoader):
     """PyYAML's safe loader, but a setting given twice is an error, not "last wins"."""
 
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False):
+    # Checked as each mapping is read, before `<<` merges copy keys into it.
+    def compose_mapping_node(self, anchor) -> yaml.MappingNode:
+        node = super().compose_mapping_node(anchor)
         seen: set[tuple[str, str]] = set()
         for key_node, _ in node.value:
             if isinstance(key_node, yaml.ScalarNode):
                 key = (key_node.tag, key_node.value)
                 if key in seen:
                     problem = f"{key_node.value!r} is set more than once"
-                    raise ConstructorError(None, None, problem, key_node.start_mark)
+                    raise ComposerError(None, None, problem, key_node.start_mark)
                 seen.add(key)
-        return super().construct_mapping(node, deep)
+        return node
 
 
 def _email_address(value: str) -> str:
@@ -61,7 +63,11 @@ class _Section(BaseModel):
     @classmethod
     def _empty_means_default(cls, data: object) -> object:
         if isinstance(data, dict):
-            return {name: value for name, value in data.items() if value is not None}
+            return {
+                name: value
+                for name, value in data.items()
+                if value is not None or name not in cls.model_fields
+            }
         return data
 
 
@@ -99,16 +105,22 @@ class Config(_Section):
 def load(path: Path) -> Config:
     """Read and validate the config file, or raise `ConfigError` explaining why not."""
     try:
-        # Bytes, so PyYAML detects the encoding and reports bad bytes as YAML errors.
-        # S506: _StrictLoader is a SafeLoader, so it can't run Python tags either.
-        data = yaml.load(path.read_bytes(), Loader=_StrictLoader)  # noqa: S506
+        raw = path.read_bytes()
     except FileNotFoundError:
         message = f"No config file at {path}. Create one, or pass --config PATH."
         raise ConfigError(message) from None
     except OSError as error:
         raise ConfigError(f"Can't read {path}: {error.strerror or error}") from None
+    try:
+        # Bytes, so PyYAML detects the encoding and reports bad bytes as YAML errors.
+        # S506: _StrictLoader is a SafeLoader, so it can't run Python tags either.
+        data = yaml.load(raw, Loader=_StrictLoader)  # noqa: S506
     except yaml.YAMLError as error:
         raise ConfigError(f"{path} isn't valid YAML{_yaml_problem(error)}") from None
+    except (ValueError, KeyError, AttributeError):
+        # PyYAML raises these, not YAMLError, for e.g. `!!int abc` or `!!bool maybe`.
+        message = f"{path} isn't valid YAML: a value doesn't match its `!!` type tag"
+        raise ConfigError(message) from None
     except RecursionError:
         raise ConfigError(f"{path} is nested too deeply to read") from None
     try:
@@ -131,10 +143,12 @@ def _yaml_problem(error: yaml.YAMLError) -> str:
 
 
 def _dotted_path(error: ErrorDetails) -> str:
-    # repr() shows control characters in setting names as escapes, so a crafted
-    # name can't send commands to the user's terminal.
+    # repr() quotes an empty setting name, and shows control characters as escapes
+    # so a crafted name can't send commands to the user's terminal.
     parts = [
-        repr(part) if isinstance(part, str) and not part.isprintable() else str(part)
+        repr(part)
+        if isinstance(part, str) and not (part and part.isprintable())
+        else str(part)
         for part in error["loc"]
     ]
     return ".".join(parts) or "(whole file)"

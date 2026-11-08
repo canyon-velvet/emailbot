@@ -44,6 +44,14 @@ def test_config_path_expands_a_tilde_the_shell_left_alone(home):
     assert result.stdout == f"{home / 'my.yaml'}\n"
 
 
+def test_config_path_keeps_a_tilde_name_that_is_no_user(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--config", "~old.yaml", "config", "path"])
+
+    assert result.stdout == f"{tmp_path / '~old.yaml'}\n"
+
+
 def test_config_path_defaults_to_the_os_config_folder(home):
     result = runner.invoke(app, ["config", "path"])
 
@@ -81,8 +89,12 @@ def test_check_uses_the_defaults_for_missing_or_empty_settings(tmp_path, text):
     )
 
 
-def test_check_reports_unknown_settings_with_their_dotted_path(tmp_path):
-    path = write(tmp_path, "mdoe: live\nsecrets: {backnd: keychain}\n")
+@pytest.mark.parametrize(
+    "text",
+    ["mdoe: live\nsecrets: {backnd: keychain}\n", "mdoe:\nsecrets:\n  backnd:\n"],
+)
+def test_check_reports_unknown_settings_with_their_dotted_path(tmp_path, text):
+    path = write(tmp_path, text)
 
     result = check(path)
 
@@ -94,14 +106,19 @@ def test_check_reports_unknown_settings_with_their_dotted_path(tmp_path):
     )
 
 
-def test_check_escapes_control_characters_in_setting_names(tmp_path):
-    path = write(tmp_path, '"k\\e]0;PWNED\\a": 1\n')
+@pytest.mark.parametrize(
+    ("text", "shown"),
+    [
+        ('"k\\e]0;PWNED\\a": 1\n', "'k\\x1b]0;PWNED\\x07'"),  # control characters
+        ("'': 1\n", "''"),
+    ],
+)
+def test_check_quotes_setting_names_that_would_print_unclearly(tmp_path, text, shown):
+    path = write(tmp_path, text)
 
     result = check(path)
 
-    assert result.stderr == (
-        f"{path} has 1 problem:\n  'k\\x1b]0;PWNED\\x07': unknown setting\n"
-    )
+    assert result.stderr == f"{path} has 1 problem:\n  {shown}: unknown setting\n"
 
 
 def test_check_reports_invalid_values_with_their_dotted_path(tmp_path):
@@ -193,14 +210,55 @@ def test_check_rejects_a_file_that_is_not_a_group_of_settings(tmp_path):
     )
 
 
-def test_check_rejects_a_setting_given_twice(tmp_path):
-    path = write(tmp_path, "mode: shadow\naccounts: []\nmode: live\n")
+@pytest.mark.parametrize(
+    ("text", "where", "name"),
+    [
+        ("mode: shadow\naccounts: []\nmode: live\n", "line 3, column 1", "mode"),
+        (
+            "secrets:\n  <<: {backend: keychain, backend: 1password, vault: V}\n",
+            "line 2, column 27",
+            "backend",
+        ),
+    ],
+)
+def test_check_rejects_a_setting_given_twice(tmp_path, text, where, name):
+    path = write(tmp_path, text)
 
     result = check(path)
 
     assert result.exit_code == 1
     assert result.stderr == (
-        f"{path} isn't valid YAML at line 3, column 1: 'mode' is set more than once\n"
+        f"{path} isn't valid YAML at {where}: '{name}' is set more than once\n"
+    )
+
+
+def test_check_lets_a_merged_setting_be_overridden(tmp_path):
+    # The anchor sits under an unknown name: the only place today's settings allow.
+    path = write(
+        tmp_path,
+        "x:\n"
+        "  sec: &sec\n"
+        "    <<: {backend: keychain}\n"
+        "    backend: 1password\n"
+        "    vault: Family\n"
+        "secrets:\n"
+        "  <<: *sec\n",
+    )
+
+    result = check(path)
+
+    assert result.stderr == f"{path} has 1 problem:\n  x: unknown setting\n"
+
+
+@pytest.mark.parametrize("value", ["!!int abc", "!!bool maybe", "!!timestamp abc"])
+def test_check_reports_a_value_that_does_not_fit_its_type_tag(tmp_path, value):
+    path = write(tmp_path, f"mode: {value}\n")
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} isn't valid YAML: a value doesn't match its `!!` type tag\n"
     )
 
 

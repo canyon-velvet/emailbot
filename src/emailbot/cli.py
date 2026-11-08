@@ -1,5 +1,6 @@
 """The `emailbot` command-line interface."""
 
+import contextlib
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated
@@ -50,8 +51,12 @@ def main(
     ] = False,
 ) -> None:
     """A security-first email assistant for Gmail. It never sends email."""
-    default = Path(typer.get_app_dir("emailbot")) / "config.yaml"
-    ctx.obj = config_path.expanduser().absolute() if config_path else default
+    path = config_path or Path(typer.get_app_dir("emailbot")) / "config.yaml"
+    # Expand a `~` the shell left alone (e.g. quoted). Like a shell, keep `~name`
+    # as it is when there's no such user.
+    with contextlib.suppress(RuntimeError):
+        path = path.expanduser()
+    ctx.obj = path.absolute()
 
 
 @config_app.command("path")
