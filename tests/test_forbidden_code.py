@@ -11,7 +11,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src" / "emailbot"
 
-# Gmail API names for sending, permanent deletion, forwarding and delegated access.
+# Gmail API names that send mail (auto-replies too), permanently delete it,
+# forward it, or grant delegated access.
 BANNED_ATTRIBUTES = {
     "send",
     "delete",
@@ -20,20 +21,41 @@ BANNED_ATTRIBUTES = {
     "autoForwarding",
     "updateAutoForwarding",  # the API method that turns auto-forwarding on
     "delegates",
+    "updateVacation",  # turns on Gmail's auto-reply, which sends mail for the user
 }
+
+# Clients that send mail, or (imaplib) can permanently delete it.
+BANNED_MODULES = {"smtplib", "aiosmtplib", "imaplib"}
 
 
 def find_forbidden(source: str | bytes, path: str) -> list[str]:
     """Return a `path:line: rule` message for each banned use in `source`."""
     found: list[tuple[int, str]] = []
     for node in ast.walk(ast.parse(source, filename=path)):
-        if isinstance(node, ast.Attribute) and node.attr in BANNED_ATTRIBUTES:
-            found.append((node.lineno, f"banned attribute `.{node.attr}`"))
-        elif isinstance(node, ast.Import) and "smtplib" in {a.name for a in node.names}:
-            found.append((node.lineno, "banned import of `smtplib`"))
-        elif isinstance(node, ast.ImportFrom) and node.module == "smtplib":
-            found.append((node.lineno, "banned import of `smtplib`"))
+        match node:
+            case ast.Attribute(attr=name) if name in BANNED_ATTRIBUTES:
+                found.append((node.lineno, f"banned attribute `.{name}`"))
+            # A Gmail filter's forward action, `{"action": {"forward": address}}`,
+            # as a string, a keyword or an attribute. Crude on purpose: the real
+            # fix is building filters from a fixed template.
+            case (
+                ast.Constant(value="forward")
+                | ast.keyword(arg="forward")
+                | ast.Attribute(attr="forward")
+            ):
+                rule = "banned name `forward` (Gmail filter forwarding)"
+                found.append((node.lineno, rule))
+            case ast.Import() | ast.ImportFrom():
+                for module in imported_modules(node):
+                    if module.split(".")[0] in BANNED_MODULES:
+                        found.append((node.lineno, f"banned import of `{module}`"))
     return [f"{path}:{line}: {rule}" for line, rule in sorted(found)]
+
+
+def imported_modules(node: ast.Import | ast.ImportFrom) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    return [node.module] if node.module else []
 
 
 def test_package_has_no_forbidden_code():
@@ -93,6 +115,28 @@ def test_package_has_no_forbidden_code():
             id="delegates",
         ),
         pytest.param(
+            "def f(service):\n"
+            "    service.users().settings().updateVacation(userId='me', body=reply)\n",
+            "sample.py:2: banned attribute `.updateVacation`",
+            id="updateVacation",
+        ),
+        pytest.param(
+            "def f(address):\n"
+            "    return {'criteria': {}, 'action': {'forward': address}}\n",
+            "sample.py:2: banned name `forward` (Gmail filter forwarding)",
+            id="forward as a string",
+        ),
+        pytest.param(
+            "def f(address):\n    return {'action': dict(forward=address)}\n",
+            "sample.py:2: banned name `forward` (Gmail filter forwarding)",
+            id="forward as a keyword",
+        ),
+        pytest.param(
+            "def f(action, address):\n    action.forward = address\n",
+            "sample.py:2: banned name `forward` (Gmail filter forwarding)",
+            id="forward as an attribute",
+        ),
+        pytest.param(
             "import email\nimport os, smtplib as mail\n",
             "sample.py:2: banned import of `smtplib`",
             id="import smtplib",
@@ -101,6 +145,16 @@ def test_package_has_no_forbidden_code():
             "import email\nfrom smtplib import SMTP\n",
             "sample.py:2: banned import of `smtplib`",
             id="from smtplib import",
+        ),
+        pytest.param(
+            "import email\nimport imaplib\n",
+            "sample.py:2: banned import of `imaplib`",
+            id="import imaplib",
+        ),
+        pytest.param(
+            "import email\nfrom aiosmtplib.smtp import SMTP\n",
+            "sample.py:2: banned import of `aiosmtplib.smtp`",
+            id="from aiosmtplib submodule import",
         ),
     ],
 )
@@ -120,6 +174,8 @@ def test_checker_passes_allowed_gmail_calls_and_near_miss_names():
         "    messages.trash(userId='me', id=message_id).execute()\n"
         "    messages.modify(userId='me', id=message_id, body={}).execute()\n"
         "    service.users().drafts().create(userId='me', body={}).execute()\n"
+        "    promo = {'criteria': {'from': 'a@b.c'}, 'action': {'addLabelIds': []}}\n"
+        "    service.users().settings().filters().create(userId='me', body=promo)\n"
         "    keyring.delete_password('emailbot', 'token')\n"
     )
     assert find_forbidden(clean, "sample.py") == []
