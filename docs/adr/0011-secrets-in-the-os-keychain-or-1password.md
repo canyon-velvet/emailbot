@@ -10,5 +10,5 @@ emailbot holds Gmail login tokens, which can read and change a mailbox, and LLM 
 
 - All secrets go through one small secrets module (get, set, remove, exists), whichever backend is chosen.
 - emailbot gives a secret's value to `op` through its input, never as a command-line argument, so other programs can't read it from the process list.
-- Machines with no keychain, such as headless servers and Docker containers, can't store secrets until M7 adds a store for them.
+- Machines with no keychain, such as headless servers and Docker containers, can use only 1Password until M7 adds a store for them.
 - Tests use a fake keychain and a fake `op`, so they never touch real secrets.

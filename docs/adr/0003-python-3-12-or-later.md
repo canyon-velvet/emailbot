@@ -5,5 +5,5 @@ The maintainer knows Python best. The libraries the plan depends on are also str
 ## Consequences
 
 - CI tests the oldest supported version (3.12) and the latest stable one.
-- Code may use anything in 3.12, such as `match` statements and the newer generic syntax.
+- Code may use anything up to Python 3.12, such as the `type` statement for type aliases.
 - Users need Python 3.12 or later. `uv tool install` fetches a suitable Python if they don't have one.
