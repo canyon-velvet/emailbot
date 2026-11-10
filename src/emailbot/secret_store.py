@@ -8,7 +8,6 @@ from collections.abc import Iterator
 import keyring
 from keyring.backend import KeyringBackend
 from keyring.backends import fail, null
-from keyring.errors import KeyringError
 
 from emailbot.config import SecretsConfig
 
@@ -36,8 +35,8 @@ def _usable_keyring() -> KeyringBackend:
         # keyring loads the backend its settings name here, and a bad name can fail
         # in many ways.
         raise SecretStoreError(
-            "Couldn't use the keychain: the keyring backend set in "
-            f"PYTHON_KEYRING_BACKEND or keyringrc.cfg doesn't load ({error})"
+            "Couldn't use the keychain: keyring's backend settings, in "
+            f"PYTHON_KEYRING_BACKEND or keyringrc.cfg, don't work here ({error})"
         ) from None
     # keyring uses `fail` when it finds no keychain, and `null` when it's turned off.
     if isinstance(backend, fail.Keyring | null.Keyring):
@@ -54,7 +53,9 @@ def _usable_keyring() -> KeyringBackend:
 def _keychain_problems() -> Iterator[None]:
     try:
         yield
-    except KeyringError as error:
+    # Not just KeyringError: some keychains (Linux's, Windows') raise their own
+    # platform's errors.
+    except Exception as error:
         raise SecretStoreError(f"Couldn't use the keychain: {error}") from None
 
 
@@ -76,6 +77,15 @@ class Keychain:
         check_name(name)
         with _keychain_problems():
             self._backend.set_password(SERVICE, name, value)
+            kept = self._backend.get_password(SERVICE, name)
+        # Read back: some backends, e.g. keyring's chainer with nothing to chain,
+        # accept a secret and keep nothing.
+        if kept != value:
+            raise SecretStoreError(
+                f"The keychain accepted {name} but didn't keep it, so nothing was "
+                "stored. Check keyring's backend settings, in PYTHON_KEYRING_BACKEND "
+                "or keyringrc.cfg."
+            )
 
     # Not `delete`: the forbidden-code check flags any `.delete` attribute.
     def remove(self, name: str) -> bool:

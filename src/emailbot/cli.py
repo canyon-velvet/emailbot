@@ -107,9 +107,9 @@ def _fail(message: str, code: int = 1) -> NoReturn:
     raise typer.Exit(code)
 
 
-# Each `secrets` command takes extra arguments only to refuse them itself: Click's
-# own error would print them, and one may be a pasted secret.
-_TAKES_EXTRA_ARGUMENTS = {"allow_extra_args": True}
+# Each `secrets` command takes extra arguments and unknown options only to refuse
+# them itself: Click's own error would print them, and one may be a pasted secret.
+_TAKES_EXTRA_ARGUMENTS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
 
 def _refuse_extra_arguments(ctx: typer.Context) -> None:

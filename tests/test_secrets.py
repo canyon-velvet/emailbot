@@ -4,6 +4,8 @@ A fake keychain stands in for the real one (see conftest). Tests look inside it 
 to check the service name secrets are kept under, and to make it fail.
 """
 
+from pathlib import Path
+
 import keyring
 import keyring.backends.fail
 import keyring.backends.null
@@ -133,6 +135,7 @@ def test_every_command_refuses_a_name_emailbot_does_not_use(command, name):
         ["llm:openai", "--value", SECRET],
         [f"--value={SECRET}", "llm:openai"],
         ["llm:openai", f"-v{SECRET}"],
+        ["llm:openai", f"--{SECRET}"],
     ],
 )
 def test_set_never_takes_the_value_on_the_command_line(args):
@@ -182,18 +185,34 @@ def test_set_explains_a_keychain_backend_keyring_cannot_load(monkeypatch):
     assert result.exit_code == 1
     assert result.stdout == ""
     assert result.stderr == (
-        "Couldn't use the keychain: the keyring backend set in "
-        "PYTHON_KEYRING_BACKEND or keyringrc.cfg doesn't load "
+        "Couldn't use the keychain: keyring's backend settings, in "
+        "PYTHON_KEYRING_BACKEND or keyringrc.cfg, don't work here "
         "(No module named 'nosuch')\n"
     )
 
 
+def test_set_says_so_when_the_keychain_keeps_nothing(keychain, monkeypatch):
+    # e.g. keyring's chainer backend with no keychain behind it.
+    monkeypatch.setattr(keychain, "set_password", lambda *args: None)
+
+    result = run("set", "llm:openai", input=TYPED_TWICE)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        "The keychain accepted llm:openai but didn't keep it, so nothing was "
+        "stored. Check keyring's backend settings, in PYTHON_KEYRING_BACKEND or "
+        "keyringrc.cfg.\n"
+    )
+
+
+# Some keychains raise their own platform's errors, not keyring's.
+@pytest.mark.parametrize("error", [KeyringError, RuntimeError])
 @pytest.mark.parametrize("command", ["set", "status", "delete"])
 def test_every_command_explains_any_other_keychain_problem(
-    keychain, monkeypatch, command
+    keychain, monkeypatch, command, error
 ):
     for method in ("get_password", "set_password", "delete_password"):
-        monkeypatch.setattr(keychain, method, fail_with(KeyringError("It's locked")))
+        monkeypatch.setattr(keychain, method, fail_with(error("It's locked")))
 
     result = run(command, "llm:openai", input=TYPED_TWICE)
 
@@ -238,6 +257,17 @@ def test_set_explains_a_config_problem_before_asking_for_the_value(tmp_path):
     assert result.exit_code == 1
     assert result.stdout == ""
     assert result.stderr.startswith(f"{config} has 1 problem:\n  secrets.backend: ")
+
+
+def test_every_command_reads_the_default_config_file_when_there_is_one():
+    default = Path(runner.invoke(app, ["config", "path"]).stdout.strip())
+    default.parent.mkdir(parents=True)
+    default.write_text("secrets:\n  backend: 1password\n  vault: Mine\n")
+
+    result = run("status", "llm:openai")
+
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Keeping secrets in 1Password isn't supported")
 
 
 def test_set_refuses_a_config_file_given_with_config_that_does_not_exist(tmp_path):
