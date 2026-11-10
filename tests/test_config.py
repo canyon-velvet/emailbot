@@ -77,7 +77,7 @@ def test_check_accepts_a_valid_config(tmp_path):
     )
 
 
-@pytest.mark.parametrize("text", ["", "mode:\naccounts:\nsecrets:\n"])
+@pytest.mark.parametrize("text", ["", "mode:\naccounts:\nsecrets:\nmodels:\n"])
 def test_check_uses_the_defaults_for_missing_or_empty_settings(tmp_path, text):
     path = write(tmp_path, text)
 
@@ -320,3 +320,166 @@ def test_check_reports_a_path_it_cannot_read(tmp_path):
 
     assert result.exit_code == 1
     assert result.stderr.startswith(f"Can't read {tmp_path}: ")
+
+
+def test_check_accepts_a_model_for_classify_digest_and_draft(tmp_path):
+    path = write(
+        tmp_path,
+        "models:\n"
+        "  classify: {provider: openai, model: gpt-5-mini}\n"
+        "  digest: {provider: anthropic, model: claude-sonnet-5-5}\n"
+        "  draft:\n"
+        "    provider: openai-compatible\n"
+        "    model: llama4\n"
+        "    base_url: http://localhost:11434/v1\n"
+        "    local: true\n",
+    )
+
+    result = check(path)
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("Config OK: ")
+
+
+@pytest.mark.parametrize(
+    ("model", "problem"),
+    [
+        (
+            "{provider: openrouter, model: x}",
+            "models.digest.provider: Input should be 'openai', 'anthropic', "
+            "'gemini' or 'openai-compatible'",
+        ),
+        (
+            "{provider: openai-compatible, model: x}",
+            "models.digest.base_url: required when the provider is openai-compatible",
+        ),
+        ("{provider: openai}", "models.digest.model: Field required"),
+        ("{provider: openai, model: '  '}", "models.digest.model: can't be blank"),
+    ],
+)
+def test_check_rejects_an_incomplete_or_unknown_model(tmp_path, model, problem):
+    path = write(tmp_path, f"models:\n  digest: {model}\n")
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == f"{path} has 1 problem:\n  {problem}\n"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "'localhost:11434'",  # no http:// or https://
+        "'http://[::1'",
+        "'http://localhost:abc/v1'",
+        "'http://localhost:99999/v1'",
+        "'http://a b.local/v1'",
+        "'http://.local/v1'",
+        "'http://[v1.local]/v1'",  # brackets are only for IPv6 addresses
+        '"http://evil.com\\n.local/v1"',  # a line break, which URL parsers drop
+    ],
+)
+def test_check_rejects_a_base_url_that_is_not_a_full_address(tmp_path, base_url):
+    path = write(
+        tmp_path,
+        f"models:\n  digest: {{provider: openai, model: x, base_url: {base_url}}}\n",
+    )
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} has 1 problem:\n"
+        "  models.digest.base_url: should be a full address such as "
+        "http://localhost:11434/v1\n"
+    )
+
+
+def local_model(tmp_path, base_url, provider="openai-compatible"):
+    return write(
+        tmp_path,
+        f"models:\n  draft: {{provider: {provider}, model: x, local: true, "
+        f"base_url: '{base_url}'}}\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "localhost",
+        "127.0.0.1",
+        "[::1]",
+        "10.0.0.5",
+        "172.16.0.1",
+        "192.168.1.20",
+        "[fd00::1]",
+        "mypc.local",
+        "router.home.arpa",
+    ],
+)
+def test_check_lets_a_model_on_this_computer_or_network_be_local(tmp_path, host):
+    path = local_model(tmp_path, f"http://{host}:11434/v1")
+
+    result = check(path)
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("Config OK: ")
+
+
+@pytest.mark.parametrize(
+    ("host", "why"),
+    [
+        ("api.openai.com", "isn't on this computer or a private network"),
+        ("8.8.8.8", "isn't on this computer or a private network"),
+        ("172.32.0.1", "isn't on this computer or a private network"),
+        ("169.254.169.254", "is a link-local address"),
+        ("[fe80::1]", "is a link-local address"),
+    ],
+)
+def test_check_refuses_local_for_any_other_host(tmp_path, host, why):
+    path = local_model(tmp_path, f"https://{host}/v1")
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr.startswith(
+        f"{path} has 1 problem:\n  models.draft.local: {host.strip('[]')!r} {why}"
+    )
+
+
+def test_check_explains_the_local_rule_for_other_hosts(tmp_path):
+    path = local_model(tmp_path, "https://api.openai.com/v1")
+
+    result = check(path)
+
+    assert result.stderr == (
+        f"{path} has 1 problem:\n"
+        "  models.draft.local: 'api.openai.com' isn't on this computer or a private "
+        "network (local allows localhost, loopback and private IP addresses, and "
+        "names ending in .local or .home.arpa)\n"
+    )
+
+
+def test_check_explains_why_link_local_addresses_are_not_local(tmp_path):
+    path = local_model(tmp_path, "http://169.254.169.254/v1")
+
+    result = check(path)
+
+    assert result.stderr == (
+        f"{path} has 1 problem:\n"
+        "  models.draft.local: '169.254.169.254' is a link-local address, which "
+        "cloud metadata services use, so it can't count as local\n"
+    )
+
+
+def test_check_refuses_local_for_a_cloud_provider(tmp_path):
+    path = local_model(tmp_path, "http://localhost:11434/v1", provider="openai")
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} has 1 problem:\n"
+        "  models.draft.local: only for the openai-compatible provider: openai, "
+        "anthropic and gemini are cloud services\n"
+    )
