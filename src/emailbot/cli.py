@@ -102,15 +102,31 @@ def _explain_problems() -> Iterator[None]:
         _fail(str(error))
 
 
-def _fail(message: str) -> NoReturn:
+def _fail(message: str, code: int = 1) -> NoReturn:
     typer.echo(message, err=True)
-    raise typer.Exit(1)
+    raise typer.Exit(code)
 
 
-def _store(ctx: typer.Context) -> secret_store.Keychain:
-    path: Path = ctx.obj
-    # With no config file yet, every setting has its default.
-    settings = config.load(path) if path.exists() else config.Config()
+# Each `secrets` command takes extra arguments only to refuse them itself: Click's
+# own error would print them, and one may be a pasted secret.
+_TAKES_EXTRA_ARGUMENTS = {"allow_extra_args": True}
+
+
+def _refuse_extra_arguments(ctx: typer.Context) -> None:
+    if ctx.args:
+        _fail(
+            f"secrets {ctx.info_name} takes only a name. To store a secret, run "
+            "`emailbot secrets set NAME` and type the value when asked, so it "
+            "doesn't end up in your shell history.",
+            code=2,
+        )
+
+
+def _open_store(ctx: typer.Context) -> secret_store.Keychain:
+    # With no config file yet, every setting has its default. A file named with
+    # --config must exist, so a typo can't quietly switch to the defaults.
+    given = ctx.find_root().params["config_path"] is not None
+    settings = config.load(ctx.obj, missing_ok=not given)
     return secret_store.open_store(settings.secrets)
 
 
@@ -118,20 +134,13 @@ def _ask_hidden(text: str) -> str:
     return typer.prompt(text, hide_input=True, default="", show_default=False)
 
 
-# Extra arguments are refused here: Click's own error would print them.
-@secrets_app.command("set", context_settings={"allow_extra_args": True})
+@secrets_app.command("set", context_settings=_TAKES_EXTRA_ARGUMENTS)
 def set_secret(ctx: typer.Context, name: SecretName) -> None:
     """Store a secret. It asks for the value twice, without showing it."""
-    if ctx.args:
-        typer.echo(
-            "secrets set takes only a name. It asks for the value, so the value "
-            "doesn't end up in your shell history.",
-            err=True,
-        )
-        raise typer.Exit(2)
+    _refuse_extra_arguments(ctx)
     with _explain_problems():
         secret_store.check_name(name)  # before the user types the value
-        store = _store(ctx)
+        store = _open_store(ctx)
         value = _ask_hidden(f"Value for {name}")
         if not value.strip():
             _fail("No value entered; nothing was stored.")
@@ -141,17 +150,19 @@ def set_secret(ctx: typer.Context, name: SecretName) -> None:
     typer.echo(f"Stored {name} in the keychain.")
 
 
-@secrets_app.command("status")
-def status(ctx: typer.Context, name: SecretName) -> None:
+@secrets_app.command("status", context_settings=_TAKES_EXTRA_ARGUMENTS)
+def show_status(ctx: typer.Context, name: SecretName) -> None:
     """Say whether a secret is set, without showing it."""
+    _refuse_extra_arguments(ctx)
     with _explain_problems():
-        is_set = _store(ctx).exists(name)
+        is_set = _open_store(ctx).exists(name)
     typer.echo("set" if is_set else "not set")
 
 
-@secrets_app.command("delete")
+@secrets_app.command("delete", context_settings=_TAKES_EXTRA_ARGUMENTS)
 def remove_secret(ctx: typer.Context, name: SecretName) -> None:
     """Remove a secret."""
+    _refuse_extra_arguments(ctx)
     with _explain_problems():
-        removed = _store(ctx).remove(name)
+        removed = _open_store(ctx).remove(name)
     typer.echo(f"Removed {name}." if removed else f"{name} wasn't set.")

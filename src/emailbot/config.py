@@ -220,11 +220,16 @@ class Config(_Section):
         return accounts
 
 
-def load(path: Path) -> Config:
-    """Read and validate the config file, or raise `ConfigError` explaining why not."""
+def load(path: Path, *, missing_ok: bool = False) -> Config:
+    """Read and validate the config file, or raise `ConfigError` explaining why not.
+
+    With `missing_ok`, no file at `path` means every setting has its default.
+    """
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
+        if missing_ok:
+            return Config()
         message = f"No config file at {path}. Create one, or pass --config PATH."
         raise ConfigError(message) from None
     except OSError as error:
