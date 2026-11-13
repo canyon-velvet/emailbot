@@ -201,6 +201,15 @@ def test_check_rejects_a_vault_name_with_control_characters(tmp_path, vault):
     )
 
 
+@pytest.mark.parametrize("vault", ["👩‍💻 Work", "Family\u00a0Vault"])
+def test_check_accepts_a_vault_name_without_control_characters(tmp_path, vault):
+    secrets = f"secrets:\n  backend: 1password\n  vault: {json.dumps(vault)}\n"
+
+    result = check(write(tmp_path, secrets))
+
+    assert result.exit_code == 0
+
+
 def test_check_explains_a_value_that_should_be_a_group_of_settings(tmp_path):
     path = write(tmp_path, "secrets: keychain\n")
 

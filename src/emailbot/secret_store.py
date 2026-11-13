@@ -3,6 +3,7 @@ them."""
 
 import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -116,22 +117,27 @@ class Keychain:
         return True
 
 
+# How long to wait for `op`: long enough to answer 1Password's unlock prompt.
+OP_TIMEOUT_SECONDS = 120
+
 # How `op` 2.x says it's locked, signed out, or can't reach the 1Password app.
 _LOCKED_OR_SIGNED_OUT = (
-    "not signed in",
     "not currently signed in",
+    "account is not signed in",
     "No accounts configured",
-    "authorization",
-    "desktop app",
+    "authorization prompt dismissed",
+    "authorization timeout",
+    "connecting to desktop app",
 )
 _ERROR_PREFIX = re.compile(r"^\[ERROR\] \S+ \S+ ", re.MULTILINE)
+_NO_SUCH_ITEM = re.compile(r'"llm:[a-z0-9-]+" isn\'t an item ')
 
 
-class _NoSuchItem(Exception):
+class _NoSuchItem(SecretStoreError):
     pass
 
 
-def _password(value: str) -> dict[str, Any]:
+def _new_password_field(value: str) -> dict[str, Any]:
     return {
         "id": "password",
         "type": "CONCEALED",
@@ -168,26 +174,35 @@ class OnePassword:
     def set(self, name: str, value: str) -> None:
         item = self._item(name)
         if item is None:
-            new = {"title": name, "category": "PASSWORD", "fields": [_password(value)]}
+            fields = [_new_password_field(value)]
+            new = {"title": name, "category": "PASSWORD", "fields": fields}
             create = ["create", "--category=Password", f"--title={name}", "-"]
             self._op("item", *create, input=new)
-            return
-        # Edited, not created again: 1Password allows two items with the same title.
-        field = _password_field(item)
-        if field is None:  # an item made by hand, without a password field
-            item.setdefault("fields", []).append(_password(value))
         else:
-            field["value"] = value
-        self._op("item", "edit", name, input=item)
+            # Edited, not created again: 1Password allows two items with the same
+            # title. `edit` replaces the whole item, so the rest of it is sent back.
+            field = _password_field(item)
+            if field is None:  # an item made by hand, without a password field
+                item.setdefault("fields", []).append(_new_password_field(value))
+            else:
+                field["value"] = value
+            self._op("item", "edit", name, input=item)
+        # Read back: an `op` older than 2.30 ignores the item it's given.
+        if self.get(name) != value:
+            raise SecretStoreError(
+                f"1Password accepted {name} but didn't keep the new value, so it isn't "
+                "stored. Check that the 1Password CLI is version 2.30 or later "
+                "(`op --version`)."
+            )
 
     # Not `delete`: the forbidden-code check flags any `.delete` attribute.
     def remove(self, name: str) -> bool:
         """Remove the secret. False if it wasn't set."""
-        check_name(name)
-        try:
-            self._op("item", "delete", name)
-        except _NoSuchItem:
+        # Checked first, so an item of that name made by hand, without a password,
+        # is left alone.
+        if not self.exists(name):
             return False
+        self._op("item", "delete", name)
         return True
 
     def _item(self, name: str) -> dict[str, Any] | None:
@@ -208,22 +223,30 @@ class OnePassword:
                 # `op` reads piped input, so give it none unless it needs some.
                 stdin=subprocess.DEVNULL if input is None else None,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                timeout=OP_TIMEOUT_SECONDS,
                 check=False,
             )
+        except subprocess.TimeoutExpired:
+            raise SecretStoreError(
+                f"The 1Password CLI (op) didn't answer within {OP_TIMEOUT_SECONDS} "
+                "seconds. If you haven't used it before, run `op signin` in a "
+                "terminal once, then try again."
+            ) from None
         except OSError as error:
             message = f"Couldn't run the 1Password CLI (op): {error.strerror or error}"
             raise SecretStoreError(message) from None
         if result.returncode == 0:
             return result.stdout
         problem = _ERROR_PREFIX.sub("", result.stderr).strip()
-        if "isn't an item" in problem:
-            raise _NoSuchItem
-        if "isn't a vault" in problem:
+        # Checked first: `op` repeats the vault's name, which could be anything.
+        if problem.startswith(f'"{self._vault}" isn\'t a vault'):
             raise SecretStoreError(
                 f"1Password has no vault named {self._vault!r} that you can use. "
                 "Check secrets.vault in the config file."
             )
+        if _NO_SUCH_ITEM.match(problem):
+            raise _NoSuchItem(f"The 1Password CLI (op) failed: {problem}")
         if any(sign in problem for sign in _LOCKED_OR_SIGNED_OUT):
             raise SecretStoreError(
                 "Couldn't get into 1Password: it's locked or signed out, or the app "
@@ -243,6 +266,13 @@ def open_store(settings: SecretsConfig) -> SecretStore:
             "The 1Password CLI (op) isn't installed, or isn't on PATH. Install it and "
             "turn on its integration with the 1Password app: "
             "https://developer.1password.com/docs/cli/get-started/"
+        )
+    # Windows, and a PATH with `.` in it, find programs in the current folder too.
+    if not os.path.isabs(op):
+        raise SecretStoreError(
+            "emailbot won't run a 1Password CLI (op) found in the current folder, "
+            "where a downloaded file could pose as it. Run emailbot from another "
+            "folder."
         )
     # The config check requires a vault with 1Password.
     return OnePassword(op, settings.vault or "")

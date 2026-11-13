@@ -2,6 +2,7 @@
 
 import ipaddress
 import re
+import unicodedata
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -149,8 +150,10 @@ class SecretsConfig(_Section):
             raise ValueError("required when the backend is 1password")
         if backend == "keychain" and vault is not None:
             raise ValueError("only used when the backend is 1password")
-        # It's passed to the 1Password CLI and shown in messages.
-        if vault is not None and not vault.isprintable():
+        # 1Password allows any other character, e.g. emoji. `op` repeats the name in
+        # the errors emailbot shows, where a control character could send commands
+        # to the terminal.
+        if vault is not None and any(unicodedata.category(c) == "Cc" for c in vault):
             raise ValueError("can't contain control characters")
         return vault
 

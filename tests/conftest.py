@@ -36,26 +36,41 @@ class FakeOp:
         self.home = home
 
     def calls(self) -> list[list[str]]:
-        lines = (self.home / "calls.jsonl").read_text().splitlines()
+        log = self.home / "calls.jsonl"
+        lines = log.read_text().splitlines() if log.exists() else []
         return [json.loads(line) for line in lines]
 
-    def items(self, vault: str = "Private") -> list[tuple[str, str]]:
-        """(title, password) for each item in the vault."""
-        vaults = json.loads((self.home / "vaults.json").read_text())
-        return [
-            (item["title"], field["value"])
-            for item in vaults[vault]
-            for field in item["fields"]
-            if field["id"] == "password"
-        ]
+    def items(self) -> list[dict]:
+        """The items in the vault Private."""
+        vaults = (self.home / "vaults.json").read_text(encoding="utf-8")
+        return json.loads(vaults)["Private"]
 
-    def add_item(self, item: dict, vault: str = "Private") -> None:
-        vaults = json.loads((self.home / "vaults.json").read_text())
-        vaults[vault].append(item)
-        (self.home / "vaults.json").write_text(json.dumps(vaults))
+    def passwords(self) -> list[tuple[str, str | None]]:
+        """(title, password) for each item; None for an item without one."""
+        return [(item["title"], next(_passwords(item), None)) for item in self.items()]
 
-    def fail_with(self, error: str) -> None:
+    def add_item(self, item: dict) -> None:
+        (self.home / "vaults.json").write_text(
+            json.dumps({"Private": [*self.items(), item]})
+        )
+
+    def break_with(self, error: str) -> None:
+        """Make every call fail with this error."""
         (self.home / "failure").write_text(error)
+
+    def hang(self) -> None:
+        """Make every call wait, and never answer."""
+        (self.home / "hang").touch()
+
+    def ignore_input(self) -> None:
+        """Make `create` and `edit` ignore the item they're given."""
+        (self.home / "ignore-input").touch()
+
+
+def _passwords(item: dict):
+    for field in item.get("fields", []):
+        if field["id"] == "password":
+            yield field["value"]
 
 
 @pytest.fixture(scope="session")

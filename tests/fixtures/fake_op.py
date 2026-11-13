@@ -2,17 +2,25 @@
 
 It keeps vaults and items in `$FAKE_OP_HOME/vaults.json`, logs each call's arguments
 to `$FAKE_OP_HOME/calls.jsonl`, and answers like the real `op` 2.x for the commands
-emailbot uses. Like the real one, it allows two items with the same title. If
-`$FAKE_OP_HOME/failure` exists, every call fails with its text as the error.
+emailbot uses. Like the real one, it allows two items with the same title, hides
+concealed values unless asked to `--reveal` them, and replaces an item with the one
+`edit` is given. Files in `$FAKE_OP_HOME` change how it behaves:
+
+- `failure`: every call fails, with the file's text as the error.
+- `hang`: every call waits, and never answers.
+- `ignore-input`: `create` and `edit` ignore the item they're given, like an `op`
+  too old to read one.
 """
 
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 HOME = Path(os.environ["FAKE_OP_HOME"])
 VAULTS = HOME / "vaults.json"
+HIDDEN = "[use 'op item get --reveal' to reveal]"
 
 # The flags each command accepts, besides its one positional argument.
 COMMANDS = {
@@ -28,11 +36,29 @@ def fail(message):
     sys.exit(1)
 
 
+def given_item():
+    """The item on stdin, or None if told to ignore it."""
+    item = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+    return None if (HOME / "ignore-input").exists() else item
+
+
+def shown(item, flags):
+    if "reveal" in flags:
+        return item
+    fields = [
+        {**field, "value": HIDDEN} if field.get("type") == "CONCEALED" else field
+        for field in item.get("fields", [])
+    ]
+    return {**item, "fields": fields}
+
+
 def main(args):
     with (HOME / "calls.jsonl").open("a") as log:
         log.write(json.dumps(args) + "\n")
     if (HOME / "failure").exists():
         fail((HOME / "failure").read_text())
+    if (HOME / "hang").exists():
+        time.sleep(600)
     if len(args) < 2 or args[0] != "item" or args[1] not in COMMANDS:
         fail(f"unknown command: {args[:2]}")
     command, flags, positionals = args[1], {}, []
@@ -47,7 +73,7 @@ def main(args):
     if len(positionals) != 1:
         fail(f"expected one argument, got {positionals}")
 
-    vaults = json.loads(VAULTS.read_text())
+    vaults = json.loads(VAULTS.read_text(encoding="utf-8"))
     vault = flags.get("vault")
     if vault not in vaults:
         fail(
@@ -59,8 +85,8 @@ def main(args):
     if command == "create":
         if positionals != ["-"]:
             fail("create reads its template from stdin only in these tests")
-        template = json.load(sys.stdin)
-        item = {"id": f"id{len(items)}", "title": flags["title"], **template}
+        given = given_item() or {}
+        item = {**given, "id": f"id{len(items)}", "title": flags["title"]}
         items.append(item)
     else:
         name = positionals[0]
@@ -76,13 +102,16 @@ def main(args):
                 "by its ID"
             )
         item = matches[0]
-        if command == "edit":
-            item.update(json.load(sys.stdin), id=item["id"])
+        index = items.index(item)
+        if command == "edit" and (given := given_item()) is not None:
+            item = items[index] = {**given, "id": item["id"]}
         elif command == "delete":
             items.remove(item)
-    VAULTS.write_text(json.dumps(vaults))
+    VAULTS.write_text(json.dumps(vaults, ensure_ascii=False), encoding="utf-8")
     if command != "delete":
-        print(json.dumps(item))
+        sys.stdout.buffer.write(
+            json.dumps(shown(item, flags), ensure_ascii=False).encode("utf-8")
+        )
 
 
 main(sys.argv[1:])
