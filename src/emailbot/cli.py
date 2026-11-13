@@ -122,7 +122,7 @@ def _refuse_extra_arguments(ctx: typer.Context) -> None:
         )
 
 
-def _open_store(ctx: typer.Context) -> secret_store.Keychain:
+def _open_store(ctx: typer.Context) -> secret_store.SecretStore:
     # With no config file yet, every setting has its default. A file named with
     # --config must exist, so a typo can't quietly switch to the defaults.
     given = ctx.find_root().params["config_path"] is not None
@@ -141,13 +141,14 @@ def set_secret(ctx: typer.Context, name: SecretName) -> None:
     with _explain_problems():
         secret_store.check_name(name)  # before the user types the value
         store = _open_store(ctx)
+        store.exists(name)  # so a store it can't reach fails before the value is typed
         value = _ask_hidden(f"Value for {name}")
         if not value.strip():
             _fail("No value entered; nothing was stored.")
         if _ask_hidden("Enter it again") != value:
             _fail("The two values don't match; nothing was stored.")
         store.set(name, value)
-    typer.echo(f"Stored {name} in the keychain.")
+    typer.echo(f"Stored {name} in {store.where}.")
 
 
 @secrets_app.command("status", context_settings=_TAKES_EXTRA_ARGUMENTS)

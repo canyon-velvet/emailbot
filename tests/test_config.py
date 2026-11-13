@@ -186,6 +186,21 @@ def test_check_requires_a_vault_with_1password_and_only_then(
     assert result.stderr == f"{path} has 1 problem:\n  secrets.vault: {problem}\n"
 
 
+# The vault name is passed to the 1Password CLI and shown in messages.
+@pytest.mark.parametrize(
+    "vault", ['"Pri\\tvate"', '"Pri\\nvate"', "!!binary UHJpCnZhdGU="]
+)
+def test_check_rejects_a_vault_name_with_control_characters(tmp_path, vault):
+    path = write(tmp_path, f"secrets:\n  backend: 1password\n  vault: {vault}\n")
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} has 1 problem:\n  secrets.vault: can't contain control characters\n"
+    )
+
+
 def test_check_explains_a_value_that_should_be_a_group_of_settings(tmp_path):
     path = write(tmp_path, "secrets: keychain\n")
 

@@ -149,6 +149,9 @@ class SecretsConfig(_Section):
             raise ValueError("required when the backend is 1password")
         if backend == "keychain" and vault is not None:
             raise ValueError("only used when the backend is 1password")
+        # It's passed to the 1Password CLI and shown in messages.
+        if vault is not None and not vault.isprintable():
+            raise ValueError("can't contain control characters")
         return vault
 
 
