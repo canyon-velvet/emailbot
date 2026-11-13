@@ -152,9 +152,12 @@ class SecretsConfig(_Section):
             raise ValueError("only used when the backend is 1password")
         # 1Password allows any other character, e.g. emoji. `op` repeats the name in
         # the errors emailbot shows, where a control character could send commands
-        # to the terminal.
-        if vault is not None and any(unicodedata.category(c) == "Cc" for c in vault):
+        # to the terminal. Half an emoji (a lone surrogate) can't be passed to `op`.
+        categories = {unicodedata.category(c) for c in vault or ""}
+        if "Cc" in categories:
             raise ValueError("can't contain control characters")
+        if "Cs" in categories:
+            raise ValueError("isn't valid Unicode")
         return vault
 
 

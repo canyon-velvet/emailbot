@@ -8,8 +8,8 @@ concealed values unless asked to `--reveal` them, and replaces an item with the 
 
 - `failure`: every call fails, with the file's text as the error.
 - `hang`: every call waits, and never answers.
-- `ignore-input`: `create` and `edit` ignore the item they're given, like an `op`
-  too old to read one.
+- `ignore-input`: `create` and `edit` ignore the item they're given, but say they
+  succeeded.
 """
 
 import json

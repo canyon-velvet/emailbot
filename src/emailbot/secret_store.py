@@ -161,7 +161,8 @@ class OnePassword:
     def __init__(self, op: str, vault: str):
         self._op_path = op
         self._vault = vault
-        self.where = f"the 1Password vault {vault!r}"
+        # As written: the config check rules out control characters.
+        self.where = f"the 1Password vault '{vault}'"
 
     def get(self, name: str) -> str | None:
         item = self._item(name)
@@ -187,12 +188,11 @@ class OnePassword:
             else:
                 field["value"] = value
             self._op("item", "edit", name, input=item)
-        # Read back: an `op` older than 2.30 ignores the item it's given.
+        # Read back, as with the keychain: success from `op` isn't taken on trust.
         if self.get(name) != value:
             raise SecretStoreError(
                 f"1Password accepted {name} but didn't keep the new value, so it isn't "
-                "stored. Check that the 1Password CLI is version 2.30 or later "
-                "(`op --version`)."
+                "stored. Check the item in the 1Password app, then try again."
             )
 
     # Not `delete`: the forbidden-code check flags any `.delete` attribute.
@@ -242,7 +242,7 @@ class OnePassword:
         # Checked first: `op` repeats the vault's name, which could be anything.
         if problem.startswith(f'"{self._vault}" isn\'t a vault'):
             raise SecretStoreError(
-                f"1Password has no vault named {self._vault!r} that you can use. "
+                f"1Password has no vault named '{self._vault}' that you can use. "
                 "Check secrets.vault in the config file."
             )
         if _NO_SUCH_ITEM.match(problem):

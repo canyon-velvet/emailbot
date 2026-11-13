@@ -13,7 +13,7 @@ runner = CliRunner()
 
 def write(tmp_path, text):
     path = tmp_path / "config.yaml"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -203,11 +203,25 @@ def test_check_rejects_a_vault_name_with_control_characters(tmp_path, vault):
 
 @pytest.mark.parametrize("vault", ["👩‍💻 Work", "Family\u00a0Vault"])
 def test_check_accepts_a_vault_name_without_control_characters(tmp_path, vault):
-    secrets = f"secrets:\n  backend: 1password\n  vault: {json.dumps(vault)}\n"
+    vault = json.dumps(vault, ensure_ascii=False)
+    secrets = f"secrets:\n  backend: 1password\n  vault: {vault}\n"
 
     result = check(write(tmp_path, secrets))
 
     assert result.exit_code == 0
+
+
+# e.g. half of an emoji, which can't be passed to the 1Password CLI.
+def test_check_rejects_a_vault_name_that_is_not_valid_unicode(tmp_path):
+    secrets = 'secrets:\n  backend: 1password\n  vault: "Pri\\ud800vate"\n'
+    path = write(tmp_path, secrets)
+
+    result = check(path)
+
+    assert result.exit_code == 1
+    assert result.stderr == (
+        f"{path} has 1 problem:\n  secrets.vault: isn't valid Unicode\n"
+    )
 
 
 def test_check_explains_a_value_that_should_be_a_group_of_settings(tmp_path):

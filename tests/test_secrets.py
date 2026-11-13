@@ -60,8 +60,9 @@ def use_1password(vault="Private"):
     """Write a default config file that keeps secrets in 1Password."""
     default = Path(runner.invoke(app, ["config", "path"]).stdout.strip())
     default.parent.mkdir(parents=True, exist_ok=True)
+    vault = json.dumps(vault, ensure_ascii=False)
     default.write_text(
-        f"secrets:\n  backend: 1password\n  vault: {json.dumps(vault)}\n"
+        f"secrets:\n  backend: 1password\n  vault: {vault}\n", encoding="utf-8"
     )
 
 
@@ -354,7 +355,6 @@ def test_delete_leaves_an_item_of_that_name_made_by_hand(one_password):
 
 
 def test_set_says_so_when_1password_does_not_keep_the_value(one_password):
-    # e.g. an `op` too old to read an item from its input.
     one_password.ignore_input()
 
     result = run("set", "llm:openai", input=TYPED_TWICE)
@@ -362,8 +362,7 @@ def test_set_says_so_when_1password_does_not_keep_the_value(one_password):
     assert result.exit_code == 1
     assert result.stderr == (
         "1Password accepted llm:openai but didn't keep the new value, so it isn't "
-        "stored. Check that the 1Password CLI is version 2.30 or later "
-        "(`op --version`).\n"
+        "stored. Check the item in the 1Password app, then try again.\n"
     )
 
 
@@ -449,15 +448,18 @@ def test_every_command_explains_a_vault_1password_does_not_have(one_password, co
 
 
 # `--help` would be an option if it were its own argument. `op` repeats the vault's
-# name in its messages, so one like "Work isn't an item" mustn't be read as one.
-@pytest.mark.parametrize("vault", ["--help", "Work isn't an item"])
+# name in its messages, so one like "Work isn't an item" mustn't be read as one. And
+# it's shown as it's written, e.g. with an emoji or a non-breaking space.
+@pytest.mark.parametrize(
+    "vault", ["--help", "Work isn't an item", "👩‍💻 Work", "Family\u00a0Vault"]
+)
 def test_a_vault_name_is_only_ever_a_name(one_password, vault):
     use_1password(vault=vault)
 
     result = run("status", "llm:openai")
 
     assert result.exit_code == 1
-    assert result.stderr.startswith(f"1Password has no vault named {vault!r}")
+    assert result.stderr.startswith(f"1Password has no vault named '{vault}' ")
 
 
 def test_two_1password_items_of_the_same_name_are_reported_as_op_reports_them(
